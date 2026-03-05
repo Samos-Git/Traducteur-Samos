@@ -1240,27 +1240,16 @@ const langToVoiceCode = {
   ko:'ko-KR', ar:'ar-SA', hi:'hi-IN', tr:'tr-TR', pl:'pl-PL'
 };
 
-// ResponsiveVoice noms de voix par langue
-const rvVoiceMap = {
-  fr: 'French Female', en: 'UK English Female', es: 'Spanish Female',
-  de: 'Deutsch Female', it: 'Italian Female', pt: 'Brazilian Portuguese Female',
-  nl: 'Dutch Female', ru: 'Russian Female', zh: 'Chinese Female',
-  ja: 'Japanese Female', ko: 'Korean Female', ar: 'Arabic Female',
-  hi: 'Hindi Female', tr: 'Turkish Female', pl: 'Polish Female'
-};
-
 let currentUtterance = null;
 let currentAudio = null;
 
-// Charge ResponsiveVoice une seule fois
-function loadResponsiveVoice() {
-  return new Promise((resolve) => {
-    if (window.responsiveVoice) return resolve();
-    const s = document.createElement('script');
-    s.src = 'https://code.responsivevoice.org/responsivevoice.js?key=FREE';
-    s.onload = () => resolve();
-    s.onerror = () => resolve(); // continue even if it fails
-    document.head.appendChild(s);
+// Attend que les voix soient chargées
+function getVoices() {
+  return new Promise(resolve => {
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length) return resolve(voices);
+    window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
+    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000);
   });
 }
 
@@ -1272,46 +1261,55 @@ async function speakTranslation() {
   if (!text || document.getElementById('outputText').classList.contains('placeholder')) return;
 
   // Stop si déjà en cours
-  if (window.responsiveVoice && window.responsiveVoice.isPlaying()) {
-    window.responsiveVoice.cancel();
-    btn.classList.remove('speaking');
-    btn.textContent = '🔊';
-    return;
-  }
-  if (window.speechSynthesis && window.speechSynthesis.speaking) {
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
     window.speechSynthesis.cancel();
     btn.classList.remove('speaking');
     btn.textContent = '🔊';
+    setStatus('', '');
     return;
   }
 
   btn.classList.add('speaking');
   btn.textContent = '⏹';
-  setStatus('loading', '🔊 Chargement audio…');
+  setStatus('loading', '🔊 Chargement voix…');
 
-  await loadResponsiveVoice();
+  const voices = await getVoices();
+  const langCode = langToVoiceCode[targetLang] || 'en-US';
+  const langPrefix = langCode.split('-')[0];
 
-  if (window.responsiveVoice) {
-    const voice = rvVoiceMap[targetLang] || 'UK English Female';
-    window.responsiveVoice.speak(text, voice, {
-      onstart: () => setStatus('done', '🔊 Lecture en cours…'),
-      onend: () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; setStatus('done', ''); },
-      onerror: () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; browserSpeak(text, targetLang, btn); }
-    });
-  } else {
-    browserSpeak(text, targetLang, btn);
-  }
-}
+  // Cherche la meilleure voix disponible
+  let voice = voices.find(v => v.lang === langCode)
+    || voices.find(v => v.lang.startsWith(langPrefix))
+    || null;
 
-function browserSpeak(text, targetLang, btn) {
-  if (!window.speechSynthesis) { btn.classList.remove('speaking'); btn.textContent = '🔊'; return; }
+  // Log pour debug
+  console.log(`Voix disponibles pour ${langCode}:`, voices.filter(v => v.lang.startsWith(langPrefix)).map(v => v.name));
+  if (voice) console.log('Voix choisie:', voice.name);
+  else console.log('Aucune voix locale — lecture sans voix spécifique');
+
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = langToVoiceCode[targetLang] || 'en-US';
-  utterance.rate = 0.95;
-  btn.classList.add('speaking');
-  btn.textContent = '⏹';
-  utterance.onend = utterance.onerror = () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; };
-  window.speechSynthesis.speak(utterance);
+  utterance.lang = langCode;
+  utterance.rate = 0.9;
+  if (voice) utterance.voice = voice;
+
+  utterance.onstart = () => setStatus('done', '🔊 Lecture en cours…');
+  utterance.onend = () => {
+    btn.classList.remove('speaking');
+    btn.textContent = '🔊';
+    setStatus('', '');
+    currentUtterance = null;
+  };
+  utterance.onerror = (e) => {
+    console.error('TTS error:', e);
+    btn.classList.remove('speaking');
+    btn.textContent = '🔊';
+    setStatus('error', '⚠️ Voix non disponible sur cet appareil pour cette langue.');
+    currentUtterance = null;
+  };
+
+  currentUtterance = utterance;
+  window.speechSynthesis.cancel(); // reset avant de parler
+  setTimeout(() => window.speechSynthesis.speak(utterance), 100);
 }
 
 // Show speak button after translation completes
