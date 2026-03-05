@@ -1240,74 +1240,77 @@ const langToVoiceCode = {
   ko:'ko-KR', ar:'ar-SA', hi:'hi-IN', tr:'tr-TR', pl:'pl-PL'
 };
 
+// ResponsiveVoice noms de voix par langue
+const rvVoiceMap = {
+  fr: 'French Female', en: 'UK English Female', es: 'Spanish Female',
+  de: 'Deutsch Female', it: 'Italian Female', pt: 'Brazilian Portuguese Female',
+  nl: 'Dutch Female', ru: 'Russian Female', zh: 'Chinese Female',
+  ja: 'Japanese Female', ko: 'Korean Female', ar: 'Arabic Female',
+  hi: 'Hindi Female', tr: 'Turkish Female', pl: 'Polish Female'
+};
+
 let currentUtterance = null;
 let currentAudio = null;
 
-function speakTranslation() {
+// Charge ResponsiveVoice une seule fois
+function loadResponsiveVoice() {
+  return new Promise((resolve) => {
+    if (window.responsiveVoice) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://code.responsivevoice.org/responsivevoice.js?key=FREE';
+    s.onload = () => resolve();
+    s.onerror = () => resolve(); // continue even if it fails
+    document.head.appendChild(s);
+  });
+}
+
+async function speakTranslation() {
   const text = document.getElementById('outputText').textContent;
   const targetLang = document.getElementById('targetLang').value;
   const btn = document.getElementById('speakBtn');
 
   if (!text || document.getElementById('outputText').classList.contains('placeholder')) return;
 
-  // Stop if already playing
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
+  // Stop si déjà en cours
+  if (window.responsiveVoice && window.responsiveVoice.isPlaying()) {
+    window.responsiveVoice.cancel();
+    btn.classList.remove('speaking');
+    btn.textContent = '🔊';
+    return;
+  }
+  if (window.speechSynthesis && window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
     btn.classList.remove('speaking');
     btn.textContent = '🔊';
     return;
   }
 
-  const langCode = langToVoiceCode[targetLang] || 'en';
-  const langShort = langCode.split('-')[0];
-
-  // Google Translate TTS — gratuit, supporte toutes les langues
-  const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${langShort}&client=tw-ob`;
-
-  const audio = new Audio(url);
-  currentAudio = audio;
-
   btn.classList.add('speaking');
   btn.textContent = '⏹';
   setStatus('loading', '🔊 Chargement audio…');
 
-  audio.oncanplaythrough = () => {
-    setStatus('done', '🔊 Lecture en cours…');
-  };
+  await loadResponsiveVoice();
 
-  audio.onended = () => {
-    btn.classList.remove('speaking');
-    btn.textContent = '🔊';
-    currentAudio = null;
-    setStatus('done', 'Lecture terminée.');
-  };
-
-  audio.onerror = () => {
-    // Fallback : synthèse vocale du navigateur
-    btn.classList.remove('speaking');
-    btn.textContent = '🔊';
-    currentAudio = null;
+  if (window.responsiveVoice) {
+    const voice = rvVoiceMap[targetLang] || 'UK English Female';
+    window.responsiveVoice.speak(text, voice, {
+      onstart: () => setStatus('done', '🔊 Lecture en cours…'),
+      onend: () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; setStatus('done', ''); },
+      onerror: () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; browserSpeak(text, targetLang, btn); }
+    });
+  } else {
     browserSpeak(text, targetLang, btn);
-  };
-
-  audio.play().catch(() => {
-    currentAudio = null;
-    browserSpeak(text, targetLang, btn);
-  });
+  }
 }
 
 function browserSpeak(text, targetLang, btn) {
-  if (!window.speechSynthesis) return;
+  if (!window.speechSynthesis) { btn.classList.remove('speaking'); btn.textContent = '🔊'; return; }
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = langToVoiceCode[targetLang] || 'en-US';
   utterance.rate = 0.95;
   btn.classList.add('speaking');
   btn.textContent = '⏹';
-  utterance.onend = utterance.onerror = () => {
-    btn.classList.remove('speaking');
-    btn.textContent = '🔊';
-  };
+  utterance.onend = utterance.onerror = () => { btn.classList.remove('speaking'); btn.textContent = '🔊'; };
   window.speechSynthesis.speak(utterance);
 }
 
