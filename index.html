@@ -637,6 +637,66 @@
     color: var(--gold);
   }
 
+  /* Voice buttons */
+  .mic-btn {
+    position: absolute;
+    bottom: 0.75rem;
+    left: 1rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(15,14,13,0.12);
+    background: var(--cream);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 1rem;
+  }
+
+  .mic-btn:hover { background: var(--ink); color: white; border-color: var(--ink); }
+
+  .mic-btn.recording {
+    background: var(--rust);
+    border-color: var(--rust);
+    animation: pulse-red 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(184,92,56,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(184,92,56,0); }
+  }
+
+  .speak-btn {
+    position: absolute;
+    bottom: 0.75rem;
+    left: 1rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(15,14,13,0.12);
+    background: var(--cream);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 1rem;
+    display: none;
+  }
+
+  .speak-btn.visible { display: flex; }
+  .speak-btn:hover { background: var(--sage); color: white; border-color: var(--sage); }
+  .speak-btn.speaking { background: var(--sage); border-color: var(--sage); animation: pulse-green 1s ease-in-out infinite; }
+
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(90,122,92,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(90,122,92,0); }
+  }
+
+  .panel { position: relative; }
+
   footer {
     padding: 1.5rem;
     text-align: center;
@@ -750,11 +810,13 @@
     <div class="panel">
       <div class="panel-label">Texte original</div>
       <textarea id="inputText" placeholder="Saisissez votre texte ici…" maxlength="3000" oninput="updateCharCount()"></textarea>
+      <button class="mic-btn" id="micBtn" onclick="toggleMic()" title="Dicter votre texte">🎤</button>
     </div>
 
     <div class="panel output-panel">
       <div class="panel-label">Traduction <span id="toneBadge" class="tone-badge">Standard</span></div>
       <div class="output-text placeholder" id="outputText">La traduction apparaîtra ici…</div>
+      <button class="speak-btn" id="speakBtn" onclick="speakTranslation()" title="Écouter la traduction">🔊</button>
       <button class="copy-btn" id="copyBtn" onclick="copyTranslation()">Copier</button>
     </div>
   </div>
@@ -935,6 +997,9 @@ async function doTranslate() {
   output.textContent = '';
   output.classList.remove('placeholder');
   copyBtn.classList.remove('visible');
+  document.getElementById('speakBtn').classList.remove('visible');
+  document.getElementById('speakBtn').textContent = '🔊';
+  if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
   document.getElementById('phoneticBox').classList.remove('visible');
   document.getElementById('phoneticText').textContent = '…';
   setStatus('loading', 'Traduction en cours…');
@@ -995,6 +1060,7 @@ async function doTranslate() {
     cursor.remove();
     output.textContent = translatedText;
     copyBtn.classList.add('visible');
+    document.getElementById('speakBtn').classList.add('visible');
     setStatus('done', `Traduit en ${targetName} avec succès.`);
 
     if (phoneticEnabled && translatedText) {
@@ -1102,6 +1168,121 @@ function copyTranslation() {
     btn.textContent = '✓ Copié !';
     setTimeout(() => btn.textContent = 'Copier', 2000);
   });
+}
+
+// ─── RECONNAISSANCE VOCALE ───────────────────────────────────────
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isRecording = false;
+
+const langToSpeechCode = {
+  fr:'fr-FR', en:'en-US', es:'es-ES', de:'de-DE', it:'it-IT',
+  pt:'pt-BR', nl:'nl-NL', ru:'ru-RU', zh:'zh-CN', ja:'ja-JP',
+  ko:'ko-KR', ar:'ar-SA', hi:'hi-IN', tr:'tr-TR', pl:'pl-PL', auto:'fr-FR'
+};
+
+function toggleMic() {
+  if (!SpeechRecognition) {
+    setStatus('error', '⚠️ Reconnaissance vocale non supportée sur ce navigateur.');
+    return;
+  }
+  isRecording ? stopMic() : startMic();
+}
+
+function startMic() {
+  const sourceLang = document.getElementById('sourceLang').value;
+  recognition = new SpeechRecognition();
+  recognition.lang = langToSpeechCode[sourceLang] || 'fr-FR';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    isRecording = true;
+    document.getElementById('micBtn').classList.add('recording');
+    document.getElementById('micBtn').textContent = '⏹';
+    setStatus('loading', '🎤 Écoute en cours… Parlez maintenant');
+  };
+
+  recognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    document.getElementById('inputText').value = transcript;
+    updateCharCount();
+  };
+
+  recognition.onend = () => {
+    stopMic();
+    const text = document.getElementById('inputText').value.trim();
+    if (text) {
+      setStatus('done', '🎤 Texte capturé — traduction en cours…');
+      setTimeout(doTranslate, 300);
+    }
+  };
+
+  recognition.onerror = (e) => {
+    stopMic();
+    setStatus('error', '⚠️ Erreur micro : ' + e.error);
+  };
+
+  recognition.start();
+}
+
+function stopMic() {
+  isRecording = false;
+  document.getElementById('micBtn').classList.remove('recording');
+  document.getElementById('micBtn').textContent = '🎤';
+  if (recognition) { try { recognition.stop(); } catch(e) {} }
+}
+
+// ─── SYNTHÈSE VOCALE ─────────────────────────────────────────────
+const langToVoiceCode = {
+  fr:'fr-FR', en:'en-US', es:'es-ES', de:'de-DE', it:'it-IT',
+  pt:'pt-BR', nl:'nl-NL', ru:'ru-RU', zh:'zh-CN', ja:'ja-JP',
+  ko:'ko-KR', ar:'ar-SA', hi:'hi-IN', tr:'tr-TR', pl:'pl-PL'
+};
+
+let currentUtterance = null;
+
+function speakTranslation() {
+  const text = document.getElementById('outputText').textContent;
+  const targetLang = document.getElementById('targetLang').value;
+  const btn = document.getElementById('speakBtn');
+
+  if (!text || document.getElementById('outputText').classList.contains('placeholder')) return;
+
+  // Stop if already speaking
+  if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
+    btn.classList.remove('speaking');
+    btn.textContent = '🔊';
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = langToVoiceCode[targetLang] || 'en-US';
+  utterance.rate = 0.95;
+
+  // Try to find a matching voice
+  const voices = window.speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang.startsWith(utterance.lang.split('-')[0]));
+  if (match) utterance.voice = match;
+
+  utterance.onstart = () => {
+    btn.classList.add('speaking');
+    btn.textContent = '⏹';
+  };
+  utterance.onend = utterance.onerror = () => {
+    btn.classList.remove('speaking');
+    btn.textContent = '🔊';
+  };
+
+  currentUtterance = utterance;
+  window.speechSynthesis.speak(utterance);
+}
+
+// Show speak button after translation completes
+const _origShowCopy = copyTranslation;
+function showSpeakBtn() {
+  document.getElementById('speakBtn').classList.add('visible');
 }
 </script>
 
